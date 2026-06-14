@@ -201,7 +201,11 @@ def main():
     top_n     = cfg.get("scan_top_n", 200)
     delay     = float(cfg.get("request_delay_seconds", 2.0 if not use_finmind else 0.3))
 
-    target_date = date.fromisoformat(args.date) if args.date else date.today()
+    import os
+    run_date_env = os.getenv("RUN_DATE", "").strip()
+    target_date = (date.fromisoformat(args.date) if args.date
+                   else date.fromisoformat(run_date_env) if run_date_env
+                   else date.today())
 
     if args.backfill:
         start = date.fromisoformat(cfg["start_date"])
