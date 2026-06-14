@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+tracker.db
+report_*.html
+.env
+.git/
