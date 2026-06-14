@@ -88,6 +88,9 @@ if __name__ == "__main__":
     scheduler.add_job(
         run_daily,
         CronTrigger(day_of_week="mon-fri", hour=17, minute=30, timezone=TAIPEI),
+        id="daily_report",
+        coalesce=True,          # 多次 misfire 只補跑一次
+        misfire_grace_time=60,  # 啟動時距預定時間超過 60 秒則不補跑
     )
     scheduler.start()
     logging.info("排程已啟動：每個交易日 17:30（台灣時間）自動執行")
