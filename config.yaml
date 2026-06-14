@@ -1,0 +1,167 @@
+# 外資分點追蹤設定
+
+finmind_token: ""   # 留空，改用環境變數 FINMIND_TOKEN
+
+# watch_side:
+#   buy  = 囤主力，追蹤當日買進張數
+#   sell = 出主力，追蹤當日賣出張數
+#   net  = 贏家/綜合，追蹤淨買賣（買-賣）
+
+branches:
+  # ── 外商券商（真外資主戰場）────────────────────────────
+  - id: "1360"
+    name: "港商麥格理"
+    emoji: "📉"
+    labels: ["出", "贏"]
+    watch_side: sell
+    group: "外商"
+    desc: "產業研究報告常與操作同步。一旦發布評等調降，易出現連續波段出貨。"
+
+  - id: "1440"
+    name: "美林"
+    emoji: "👑"
+    labels: ["贏", "作"]
+    watch_side: net
+    group: "外商"
+    desc: "長線精準，但近年程式交易興起，當日洗盤量大（常帶「作」標籤）。"
+
+  - id: "1470"
+    name: "台灣摩根士丹利（大摩）"
+    emoji: "👑"
+    labels: ["贏", "囤"]
+    watch_side: net
+    group: "外商"
+    desc: "掌控台股大量權值股籌碼，大摩一動，台股大盤跟著動。"
+
+  - id: "1480"
+    name: "美商高盛"
+    emoji: "👑"
+    labels: ["贏", "囤"]
+    watch_side: net
+    group: "外商"
+    desc: "國際頂級投行代表，操作精準度高，往往跟隨全球經理人資金配置移動。"
+
+  - id: "1520"
+    name: "瑞士信貸（現UBS旗下）"
+    emoji: "📈"
+    labels: ["囤", "贏"]
+    watch_side: buy
+    group: "外商"
+    desc: "指標性長線大外資，偏好大型權值股，低檔護盤、高檔囤貨常客。Credit Suisse 2023 年由 UBS 收購，台灣仍登記原名。"
+
+  - id: "1560"
+    name: "港商野村"
+    emoji: "📈"
+    labels: ["囤", "贏"]
+    watch_side: buy
+    group: "外商"
+    desc: "操作台股波段非常有一套，常在中長線低點開始默默囤貨。"
+
+  - id: "1590"
+    name: "花旗環球"
+    emoji: "📈"
+    labels: ["囤", "出"]
+    watch_side: buy
+    group: "外商"
+    desc: "指標性波段外資，對景氣循環股操作極具連續性，非買即賣。"
+
+  - id: "1650"
+    name: "新加坡商瑞銀"
+    emoji: "📈"
+    labels: ["囤", "贏"]
+    watch_side: buy
+    group: "外商"
+    desc: "瑞銀海外核心專戶，與 1520 同屬 UBS 體系，偏向波段長鎖特性。"
+
+  - id: "8440"
+    name: "摩根大通（小摩）"
+    emoji: "👑"
+    labels: ["贏", "囤"]
+    watch_side: net
+    group: "外商"
+    desc: "台灣權值股與半導體供應鏈的造浪者，籌碼勝率極高。"
+
+  - id: "8900"
+    name: "法銀巴黎"
+    emoji: "📈"
+    labels: ["囤"]
+    watch_side: buy
+    group: "外商"
+    desc: "操作作風相較低調，但長線資金部位不容小覷。"
+
+  # ── 本土龍頭券商外資專戶 ──────────────────────────────
+  - id: "7000"
+    name: "兆豐證券"
+    emoji: "📉"
+    labels: ["出"]
+    watch_side: sell
+    group: "本土"
+    desc: "官股券商體系的外資帳戶，操作相對保守，在市場過熱時常看見其站在調節出貨方。"
+
+  - id: "9100"
+    name: "群益金鼎"
+    emoji: "📈"
+    labels: ["囤", "贏"]
+    watch_side: buy
+    group: "本土"
+    desc: "中小型黑馬股的搖籃，常有地緣主力或內幕資金利用此專戶在起漲點前低調囤貨。"
+
+  - id: "9200"
+    name: "凱基證券"
+    emoji: "👑"
+    labels: ["贏", "出"]
+    watch_side: net
+    group: "本土"
+    desc: "許多本土大戶與中小型私募基金的下單大本營，爆發力強、高檔出貨犀利。"
+
+  - id: "9268"
+    name: "凱基台北"
+    emoji: "⚡"
+    labels: ["贏", "出"]
+    watch_side: net
+    group: "本土"
+    desc: "台灣指標性的隔日沖／波段超級大主力，進出常被列入外資籌碼，專洗短線。"
+
+  - id: "9600"
+    name: "富邦證券"
+    emoji: "📉"
+    labels: ["出", "贏"]
+    watch_side: sell
+    group: "本土"
+    desc: "公司派資金與長線大戶的愛用帳戶，股價拉高題材實現時，常扮演主要出貨者。"
+
+  - id: "9800"
+    name: "元大證券"
+    emoji: "📈"
+    labels: ["囤", "出"]
+    watch_side: buy
+    group: "本土"
+    desc: "全台最大外資代單專戶，資金駁雜。既有長線ETF成分股調整囤貨，也有主力提款出貨。"
+
+  - id: "9A00"
+    name: "永豐金證券"
+    emoji: "👑"
+    labels: ["贏"]
+    watch_side: net
+    group: "本土"
+    desc: "近年因數位平台發展，吸納大量中小型波段操盤手，操作個股的短波段勝率極高。"
+
+# 持倉追蹤起始日期
+start_date: "2025-01-01"
+
+# Email 設定
+email:
+  sender: "chenyin.yo@gmail.com"    # 或設環境變數 GMAIL_SENDER
+  app_password: ""                   # 環境變數 GMAIL_APP_PASSWORD
+  recipients:
+    - "shelly7526@gmail.com"         # 或設環境變數 GMAIL_RECIPIENTS（逗號分隔）
+  subject_prefix: "[外資追蹤]"
+
+# 掃描 TWSE 成交量前 N 大股票
+scan_top_n: 200
+
+# 每檔請求延遲（秒）
+request_delay_seconds: 2.0
+
+# 單日買賣超張數門檻（低於此值不顯示）
+alert_threshold_lots: 100
