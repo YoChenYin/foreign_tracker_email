@@ -1,9 +1,5 @@
 {
   "build": {
-    "type": "nixpacks"
-  },
-  "start": {
-    "type": "command",
-    "command": "python main.py"
+    "type": "dockerfile"
   }
 }
