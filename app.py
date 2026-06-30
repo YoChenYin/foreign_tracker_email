@@ -129,35 +129,20 @@ def probe():
 
 @app.route("/probe-broker")
 def probe_broker():
-    """診斷用：確認 branch.aspx?no=2330 的實際資料格式（HTML <td> vs JavaScript）。"""
-    import re as _re
+    """診斷用：從 histock2017.js 找 branch 相關的 AJAX endpoint URL。"""
     import fetcher
-    from datetime import date
-    today = date.today()
-    date_str = today.strftime("%Y%m%d")
     s = fetcher._get_histock_session()
     try:
-        r = s.get(fetcher.HISTOCK_BRANCH_URL,
-                  params={"no": "2330", "from": date_str, "to": date_str}, timeout=20)
-        html = r.text
-
-        # 找第一個 <td>（是否有資料列）
-        first_td = html.find("<td")
-        td_snippet = html[first_td:first_td + 500] if first_td >= 0 else ""
-
-        # 找 jsonDatas 賦值位置，截取 3000 字元看資料結構
-        js_idx = html.find("jsonDatas")
-        js_snippet = html[js_idx:js_idx + 3000] if js_idx >= 0 else ""
-
-        # 統計 <td 出現次數
-        td_count = len(_re.findall(r"<td", html))
-
+        r = s.get("https://histock.tw/jscript/histock2017.js?v20260317", timeout=20)
+        js = r.text
+        # 找所有含 branch / broker / BranchData / GetData 的行
+        lines = js.split("\n")
+        hits = [l.strip() for l in lines
+                if any(kw in l for kw in ["branch", "Branch", "broker", "Broker",
+                                          "GetData", "getdata", "ajax", "$.get", "$.post"])]
         return jsonify({
-            "date": str(today),
-            "total_bytes": len(html),
-            "td_count": td_count,
-            "first_td_snippet": td_snippet,
-            "jsonDatas_snippet": js_snippet,
+            "total_bytes": len(js),
+            "matching_lines": hits[:60],
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
