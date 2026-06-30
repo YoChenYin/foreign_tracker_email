@@ -4,6 +4,13 @@ from datetime import date
 
 # ── 小工具 ────────────────────────────────────────────────────
 
+def _fmt_value(ntd: int) -> str:
+    """NT$ 金額格式化：≥1億 → X.X億，否則 X,XXX萬"""
+    wan = ntd // 10_000
+    if wan >= 10_000:
+        return f"{wan / 10_000:.1f}億"
+    return f"{wan:,}萬"
+
 def _badge(label: str) -> str:
     colors = {
         "囤": ("#dcfce7", "#16a34a"),
@@ -18,79 +25,88 @@ def _badge(label: str) -> str:
 
 # ── 交易區塊（按分點分組）────────────────────────────────────
 
-def _broker_stock_rows(rows: list[dict], metric_col: str, dynamic_color: bool) -> str:
-    html = ""
-    for t in sorted(rows, key=lambda x: x[metric_col], reverse=True):
-        val = t[metric_col]
-        if dynamic_color:
-            color   = "#16a34a" if val >= 0 else "#dc2626"
-            val_str = f"+{val:,}" if val > 0 else f"{val:,}"
-        else:
-            color   = "#16a34a" if metric_col == "buy_lots" else "#dc2626"
-            val_str = f"{val:,}"
-        html += (
-            f'<tr style="border-bottom:1px solid #f3f4f6">'
-            f'<td style="padding:4px 8px;color:#374151">{t["stock_code"]} {t["stock_name"]}</td>'
-            f'<td style="padding:4px 8px;text-align:right">{t["buy_lots"]:,}</td>'
-            f'<td style="padding:4px 8px;text-align:right">{t["sell_lots"]:,}</td>'
-            f'<td style="padding:4px 8px;text-align:right;color:{color};font-weight:bold">{val_str}</td>'
-            f'</tr>'
-        )
-    return html
-
-
-def _trade_section(title: str, trades: list[dict], metric_col: str,
-                   metric_label: str, broker_meta: dict,
-                   dynamic_color: bool = False) -> str:
+def _trade_section(title: str, trades: list[dict], metric_col: str, value_col: str,
+                   broker_meta: dict, dynamic_color: bool = False) -> str:
     if not trades:
         empty = ('<p style="color:#9ca3af;font-size:12px;margin:4px 0 16px">'
                  '今日無達門檻記錄</p>')
         return f'<h3 style="margin:22px 0 4px;font-size:14px">{title}</h3>{empty}'
 
-    # 按分點分組，分點本身以「該組 metric 合計」排序
-    by_broker: dict[str, list[dict]] = {}
+    # 按股票分組，以「該股 value 合計絕對值」排序
+    by_stock: dict[str, list[dict]] = {}
     for t in trades:
-        by_broker.setdefault(t["broker_code"], []).append(t)
+        by_stock.setdefault(t["stock_code"], []).append(t)
 
-    broker_order = sorted(
-        by_broker.keys(),
-        key=lambda bid: sum(r[metric_col] for r in by_broker[bid]),
+    stock_order = sorted(
+        by_stock.keys(),
+        key=lambda c: abs(sum(r[value_col] for r in by_stock[c])),
         reverse=True,
     )
 
-    body = ""
-    for bid in broker_order:
-        rows  = by_broker[bid]
-        meta  = broker_meta.get(bid, {})
-        emoji = meta.get("emoji", "")
-        name  = meta.get("name", bid)
-        total = sum(r[metric_col] for r in rows)
-        t_color = "#16a34a" if (dynamic_color and total >= 0) or metric_col == "buy_lots" else "#dc2626"
-        t_str   = f"+{total:,}" if dynamic_color and total > 0 else f"{total:,}"
+    if metric_col == "buy_lots":
+        hdr_bg, action_word = "#f0fdf4", "買進共"
+    elif metric_col == "sell_lots":
+        hdr_bg, action_word = "#fef2f2", "賣出共"
+    else:
+        hdr_bg, action_word = "#fefce8", "淨買賣共"
 
-        body += (
-            f'<tr style="background:#f9fafb">'
-            f'<td colspan="3" style="padding:6px 8px;font-weight:600;font-size:12px;color:#374151">'
-            f'{emoji} {name}（{bid}）</td>'
-            f'<td style="padding:6px 8px;text-align:right;font-weight:700;font-size:12px;color:{t_color}">'
-            f'{t_str} 張</td>'
+    cards = ""
+    for code in stock_order:
+        rows  = by_stock[code]
+        name  = rows[0]["stock_name"]
+        total_val = sum(r[value_col] for r in rows)
+        tv_str    = (_fmt_value(abs(total_val))
+                     if not dynamic_color
+                     else (f"+{_fmt_value(total_val)}" if total_val >= 0
+                           else f"-{_fmt_value(abs(total_val))}"))
+
+        cards += (
+            f'<table style="width:100%;margin-bottom:10px;border:1px solid #e5e7eb;'
+            f'border-collapse:collapse;font-size:13px">'
+            f'<tr style="background:{hdr_bg}">'
+            f'<td style="padding:7px 10px;font-weight:700">{code} {name}</td>'
+            f'<td style="padding:7px 10px;text-align:right;color:#6b7280;font-size:11px">'
+            f'{len(rows)} 家分點 ｜ {action_word} {tv_str}</td>'
             f'</tr>'
         )
-        body += _broker_stock_rows(rows, metric_col, dynamic_color)
 
-    return f"""
-  <h3 style="margin:22px 0 5px;font-size:14px">{title}</h3>
-  <table style="width:100%;border-collapse:collapse;font-size:13px">
-    <thead>
-      <tr style="background:#e5e7eb;border-bottom:2px solid #d1d5db">
-        <th style="padding:6px 8px;text-align:left">個股</th>
-        <th style="padding:6px 8px;text-align:right">買進（張）</th>
-        <th style="padding:6px 8px;text-align:right">賣出（張）</th>
-        <th style="padding:6px 8px;text-align:right">{metric_label}</th>
-      </tr>
-    </thead>
-    <tbody>{body}</tbody>
-  </table>"""
+        for r in sorted(rows, key=lambda x: abs(x[value_col]), reverse=True):
+            bid   = r["broker_code"]
+            meta  = broker_meta.get(bid, {})
+            emoji = meta.get("emoji", "")
+            bname = meta.get("name", bid)
+            buy, sell, net = r["buy_lots"], r["sell_lots"], r["net_lots"]
+            bv = r.get("buy_value", 0)
+            sv = r.get("sell_value", 0)
+            nv = r.get("net_value", 0)
+
+            if metric_col == "buy_lots":
+                main = f"買 {buy:,} 張 / {_fmt_value(bv)}"
+                sub  = f"賣 {sell:,}"
+                color = "#16a34a"
+            elif metric_col == "sell_lots":
+                main = f"賣 {sell:,} 張 / {_fmt_value(sv)}"
+                sub  = f"買 {buy:,}"
+                color = "#dc2626"
+            else:
+                sign  = "+" if net >= 0 else ""
+                nv_s  = f"+{_fmt_value(nv)}" if nv >= 0 else f"-{_fmt_value(abs(nv))}"
+                main  = f"淨 {sign}{net:,} 張 / {nv_s}"
+                sub   = f"買 {buy:,}  賣 {sell:,}"
+                color = "#16a34a" if net >= 0 else "#dc2626"
+
+            cards += (
+                f'<tr style="border-top:1px solid #f3f4f6">'
+                f'<td style="padding:5px 10px 5px 18px;color:#374151;white-space:nowrap">'
+                f'{emoji} {bname}（{bid}）</td>'
+                f'<td style="padding:5px 10px;text-align:right">'
+                f'<span style="color:{color};font-weight:bold">{main}</span>'
+                f'<span style="color:#9ca3af;font-size:11px;margin-left:8px">{sub}</span>'
+                f'</td></tr>'
+            )
+        cards += "</table>"
+
+    return f'<h3 style="margin:22px 0 5px;font-size:14px">{title}</h3>{cards}'
 
 
 # ── 累積持倉 ──────────────────────────────────────────────────
@@ -179,38 +195,32 @@ def build_html_report(
     trades: list[dict],
     positions: list[dict],
     broker_meta: dict[str, dict],
-    threshold_lots: int = 0,
+    threshold_wan: int = 0,
 ) -> str:
-    date_str = report_date.strftime("%Y-%m-%d")
+    date_str    = report_date.strftime("%Y-%m-%d")
+    threshold   = threshold_wan * 10_000  # 萬元 → NT$
 
-    buy_trades = sorted(
-        [t for t in trades
-         if broker_meta.get(t["broker_code"], {}).get("watch_side") == "buy"
-         and t["buy_lots"] >= threshold_lots],
-        key=lambda x: x["buy_lots"], reverse=True,
-    )
-    sell_trades = sorted(
-        [t for t in trades
-         if broker_meta.get(t["broker_code"], {}).get("watch_side") == "sell"
-         and t["sell_lots"] >= threshold_lots],
-        key=lambda x: x["sell_lots"], reverse=True,
-    )
-    net_trades = sorted(
-        [t for t in trades
-         if broker_meta.get(t["broker_code"], {}).get("watch_side") == "net"
-         and abs(t["net_lots"]) >= threshold_lots],
-        key=lambda x: abs(x["net_lots"]), reverse=True,
-    )
+    buy_trades = [t for t in trades
+                  if broker_meta.get(t["broker_code"], {}).get("watch_side") == "buy"
+                  and t.get("buy_value", 0) >= threshold]
+    sell_trades = [t for t in trades
+                   if broker_meta.get(t["broker_code"], {}).get("watch_side") == "sell"
+                   and t.get("sell_value", 0) >= threshold]
+    net_trades = [t for t in trades
+                  if broker_meta.get(t["broker_code"], {}).get("watch_side") == "net"
+                  and abs(t.get("net_value", 0)) >= threshold]
+
+    thr_str = _fmt_value(threshold)
 
     buy_section  = _trade_section(
-        f"📈 囤貨分點 今日買進（≥ {threshold_lots} 張）",
-        buy_trades, "buy_lots", "買進（張）", broker_meta)
+        f"📈 囤貨分點 今日買進（≥ {thr_str}）",
+        buy_trades, "buy_lots", "buy_value", broker_meta)
     sell_section = _trade_section(
-        f"📉 出貨分點 今日賣出（≥ {threshold_lots} 張）",
-        sell_trades, "sell_lots", "賣出（張）", broker_meta)
+        f"📉 出貨分點 今日賣出（≥ {thr_str}）",
+        sell_trades, "sell_lots", "sell_value", broker_meta)
     net_section  = _trade_section(
-        f"👑 綜合贏家 今日淨買賣（≥ {threshold_lots} 張）",
-        net_trades, "net_lots", "淨買賣（張）", broker_meta, dynamic_color=True)
+        f"👑 綜合贏家 今日淨買賣（≥ {thr_str}）",
+        net_trades, "net_lots", "net_value", broker_meta, dynamic_color=True)
 
     return f"""<!DOCTYPE html>
 <html>
@@ -224,7 +234,7 @@ def build_html_report(
     外資分點追蹤日報 — {date_str}
   </h2>
   <p style="font-size:12px;color:#6b7280;margin:0 0 4px">
-    門檻：單日買賣超 ≥ {threshold_lots} 張 ｜ 資料來源：TWSE / histock.tw
+    門檻：單日買賣超 ≥ {thr_str} ｜ 資料來源：TWSE / histock.tw
   </p>
 
   {buy_section}

@@ -29,7 +29,6 @@ _last_run: dict = {}
 
 def run_daily():
     global _last_run
-    import fetcher
     import main as tracker
     import storage
 
@@ -41,28 +40,14 @@ def run_daily():
         storage.init_db()
         broker_meta = tracker.build_broker_meta(cfg["branches"])
         target_ids  = set(broker_meta.keys())
-        token       = cfg.get("finmind_token", "").strip()
-
-        if not token:
-            logging.error("未設定 FINMIND_TOKEN")
-            _last_run = {"status": "error", "error": "FINMIND_TOKEN not set",
-                         "at": str(datetime.now(TAIPEI))}
-            return
-
-        if not fetcher.check_finmind_access(token):
-            logging.error("FinMind token 無效或無 TaiwanStockTradingDailyReport 權限")
-            _last_run = {"status": "error", "error": "FinMind token invalid",
-                         "at": str(datetime.now(TAIPEI))}
-            return
-
-        threshold   = cfg.get("alert_threshold_lots", 100)
+        threshold   = cfg.get("alert_threshold_wan", 2000)
         top_n       = cfg.get("scan_top_n", 200)
-        delay       = float(cfg.get("request_delay_seconds", 2.0))
+        delay       = float(cfg.get("request_delay_seconds", 1.0))
 
         run_date_env = os.getenv("RUN_DATE", "").strip()
         target_date  = date.fromisoformat(run_date_env) if run_date_env else date.today()
 
-        ok = tracker.sync_date(target_date, token, target_ids, broker_meta, top_n, delay)
+        ok = tracker.sync_date(target_date, target_ids, broker_meta, top_n, delay)
         if not ok:
             logging.warning("資料同步失敗，略過發信")
             _last_run = {"status": "sync_failed", "date": str(target_date),
@@ -95,8 +80,8 @@ def scheduler_loop():
             now   = datetime.now(TAIPEI)
             today = now.date()
             if (now.weekday() < 5
-                    and now.hour == 17
-                    and now.minute == 30
+                    and now.hour == 22
+                    and now.minute == 0
                     and last_run_date != today):
                 last_run_date = today
                 run_daily()
@@ -113,37 +98,13 @@ def health():
     return jsonify({"status": "ok", "date": str(date.today()), "last_run": _last_run})
 
 
-@app.route("/probe-finmind")
-def probe_finmind():
-    """診斷用：直接呼叫 FinMind API 並回傳原始回應（含錯誤訊息）。"""
+@app.route("/probe-histock")
+def probe_histock():
+    """診斷用：測試 histock branch.aspx 能否正常抓到今日分點資料（用台積電 2330）。"""
     import fetcher
-    import main as tracker
-    cfg   = tracker.load_config()
-    token = cfg.get("finmind_token", "").strip()
-    try:
-        import requests
-        resp = requests.get(
-            fetcher.FINMIND_URL,
-            params={
-                "dataset": "TaiwanStockTradingDailyReport",
-                "data_id": "2330",
-                "start_date": "2026-06-10",
-                "end_date": "2026-06-10",
-                "token": token,
-            },
-            timeout=15,
-        )
-        payload = resp.json()
-        return jsonify({
-            "token_length": len(token),
-            "token_prefix": token[:6] + "..." if len(token) > 6 else token,
-            "http_status": resp.status_code,
-            "finmind_status": payload.get("status"),
-            "finmind_msg": payload.get("msg"),
-            "data_count": len(payload.get("data", [])),
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    stock_code = "2330"
+    result = fetcher.probe_histock(stock_code, date.today())
+    return jsonify(result)
 
 
 @app.route("/trades")

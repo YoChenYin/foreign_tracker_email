@@ -1,10 +1,35 @@
-"""資料抓取模組：FinMind TaiwanStockTradingDailyReport + TWSE 公用工具"""
+"""資料抓取模組：histock.tw 分點 + TWSE 公用工具
+
+histock branch.aspx 每檔股票顯示當日買賣最多的前 30 名分點（HTML table）。
+資料約於收盤後 7-8 小時上傳（21:00 後可用），排程請設 22:00。
+"""
 import re
 import time
 import requests
+from bs4 import BeautifulSoup
 from datetime import date
 
-FINMIND_URL = "https://api.finmindtrade.com/api/v4/data"
+_HISTOCK_BASE = "https://histock.tw"
+_HISTOCK_BRANCH = _HISTOCK_BASE + "/stock/branch.aspx"
+_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+# module-level session；由 init_session() 初始化
+_session: requests.Session | None = None
+
+
+def init_session():
+    """建立 histock session（拿 cookie），程式啟動時呼叫一次即可。"""
+    global _session
+    s = requests.Session()
+    s.headers.update(_HEADERS)
+    s.get(_HISTOCK_BASE, timeout=10)
+    _session = s
+
+
+def _get_session() -> requests.Session:
+    if _session is None:
+        init_session()
+    return _session
 
 
 # ──────────────────────────────────────────────
@@ -15,7 +40,7 @@ def get_top_stocks_by_volume(top_n: int = 200) -> list[dict]:
     """從 TWSE openapi 取得當日成交量前 N 大的上市普通股。回傳 list of {'code', 'name'}"""
     url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
     try:
-        resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+        resp = requests.get(url, headers=_HEADERS, timeout=20)
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
@@ -47,7 +72,7 @@ def get_trading_dates_in_range(start: date, end: date) -> list[date]:
             resp = requests.get(
                 "https://www.twse.com.tw/exchangeReport/STOCK_DAY",
                 params={"response": "json", "date": current.strftime("%Y%m%d"), "stockNo": "2330"},
-                headers={"User-Agent": "Mozilla/5.0"},
+                headers=_HEADERS,
                 timeout=15,
             )
             data = resp.json()
@@ -73,89 +98,112 @@ def get_trading_dates_in_range(start: date, end: date) -> list[date]:
 
 
 # ──────────────────────────────────────────────
-# FinMind API
+# histock 分點資料
 # ──────────────────────────────────────────────
 
-def check_finmind_access(token: str) -> bool:
-    """回傳 True 表示 token 有效且有 TaiwanStockTradingDailyReport 權限。"""
-    try:
-        resp = requests.get(
-            FINMIND_URL,
-            params={
-                "dataset": "TaiwanStockTradingDailyReport",
-                "data_id": "2330",
-                "start_date": "2026-06-10",
-                "end_date": "2026-06-10",
-                "token": token,
-            },
-            timeout=15,
-        )
-        return resp.json().get("status") == 200
-    except Exception:
-        return False
-
-
-def fetch_broker_trades(stock_code: str, trade_date: date, token: str) -> list[dict]:
-    """取得指定股票在指定日期所有分點的進出資料。
+def fetch_broker_trades(stock_code: str, trade_date: date) -> list[dict]:
+    """從 histock branch.aspx 抓取指定股票、日期的前 30 名分點進出資料。
     回傳 list of {'broker_id', 'broker_name', 'buy_lots', 'sell_lots', 'net_lots'}
     """
-    date_str = trade_date.isoformat()
+    date_str = trade_date.strftime("%Y%m%d")
+    url = f"{_HISTOCK_BRANCH}?no={stock_code}&d={date_str}"
+
     try:
-        resp = requests.get(
-            FINMIND_URL,
-            params={
-                "dataset": "TaiwanStockTradingDailyReport",
-                "data_id": stock_code,
-                "start_date": date_str,
-                "end_date": date_str,
-                "token": token,
-            },
-            timeout=20,
-        )
-        resp.raise_for_status()
-        payload = resp.json()
+        r = _get_session().get(url, timeout=15)
+        r.raise_for_status()
     except Exception as e:
-        print(f"  [FinMind error] {stock_code} {date_str}: {e}")
+        print(f"  [histock error] {stock_code} {date_str}: {e}")
         return []
 
-    if payload.get("status") != 200:
-        msg = payload.get("msg", "")
-        if "level" not in msg.lower():
-            print(f"  [FinMind {stock_code}] {msg[:80]}")
+    soup = BeautifulSoup(r.text, "html.parser")
+    table = soup.find("table", class_="tbChip")
+    if not table:
         return []
 
     records = []
-    for row in payload.get("data", []):
-        try:
-            buy = int(row.get("buy", 0) or 0)
-            sell = int(row.get("sell", 0) or 0)
-            records.append({
-                "broker_id":   str(row.get("securities_trader_id", "")).strip(),
-                "broker_name": str(row.get("securities_trader", "")).strip(),
-                "buy_lots":  buy,
-                "sell_lots": sell,
-                "net_lots":  buy - sell,
-            })
-        except (ValueError, TypeError):
+    for row in table.find_all("tr")[1:]:  # 略過表頭
+        cells = row.find_all("td")
+        if len(cells) < 10:
             continue
+
+        links = row.find_all("a", href=re.compile(r"bno="))
+        bnos = [re.search(r"bno=(\w+)", a["href"]).group(1) for a in links
+                if re.search(r"bno=", a["href"])]
+
+        def _parse_lots(cell) -> int:
+            txt = cell.get_text(strip=True).replace(",", "")
+            try:
+                return int(txt)
+            except ValueError:
+                return 0
+
+        def _parse_price(cell) -> float:
+            txt = cell.get_text(strip=True).replace(",", "")
+            try:
+                return float(txt)
+            except ValueError:
+                return 0.0
+
+        def _value(lots: int, price: float) -> int:
+            """成交金額 (NT$)：張數 × 1000 股/張 × 均價"""
+            return round(lots * 1000 * price)
+
+        # 左欄分點（cells[0..4]）
+        if len(bnos) >= 1:
+            buy   = _parse_lots(cells[1])
+            sell  = _parse_lots(cells[2])
+            price = _parse_price(cells[4])
+            records.append({
+                "broker_id":   bnos[0],
+                "broker_name": cells[0].get_text(strip=True),
+                "buy_lots":    buy,
+                "sell_lots":   sell,
+                "net_lots":    buy - sell,
+                "avg_price":   price,
+                "buy_value":   _value(buy,  price),
+                "sell_value":  _value(sell, price),
+                "net_value":   _value(buy - sell, price),
+            })
+
+        # 右欄分點（cells[5..9]）
+        if len(bnos) >= 2:
+            buy   = _parse_lots(cells[6])
+            sell  = _parse_lots(cells[7])
+            price = _parse_price(cells[9])
+            records.append({
+                "broker_id":   bnos[1],
+                "broker_name": cells[5].get_text(strip=True),
+                "buy_lots":    buy,
+                "sell_lots":   sell,
+                "net_lots":    buy - sell,
+                "avg_price":   price,
+                "buy_value":   _value(buy,  price),
+                "sell_value":  _value(sell, price),
+                "net_value":   _value(buy - sell, price),
+            })
+
     return records
 
 
-def discover_broker_ids(name_keywords: list[str]) -> dict[str, str]:
-    """從 TaiwanSecuritiesTraderInfo（免費）搜尋目標分點，回傳 {id: name}。"""
+def probe_histock(stock_code: str, trade_date: date) -> dict:
+    """診斷用：回傳 histock 原始抓取狀況。"""
+    date_str = trade_date.strftime("%Y%m%d")
+    url = f"{_HISTOCK_BRANCH}?no={stock_code}&d={date_str}"
     try:
-        resp = requests.get(
-            FINMIND_URL,
-            params={"dataset": "TaiwanSecuritiesTraderInfo", "token": ""},
-            timeout=15,
-        )
-        data = resp.json().get("data", [])
-    except Exception:
-        return {}
-
-    pattern = "|".join(name_keywords)
-    return {
-        str(row["securities_trader_id"]): row["securities_trader"]
-        for row in data
-        if re.search(pattern, row.get("securities_trader", ""))
-    }
+        r = _get_session().get(url, timeout=15)
+        html = r.text
+        soup = BeautifulSoup(html, "html.parser")
+        table = soup.find("table", class_="tbChip")
+        rows = table.find_all("tr")[1:] if table else []
+        all_bnos = re.findall(r"bno=(\w+)", html)
+        return {
+            "url": url,
+            "status_code": r.status_code,
+            "response_bytes": len(html),
+            "table_found": table is not None,
+            "data_rows": len(rows),
+            "broker_count": len(set(all_bnos)),
+            "bnos": sorted(set(all_bnos)),
+        }
+    except Exception as e:
+        return {"url": url, "error": str(e)}

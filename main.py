@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-外資分點持股追蹤主程式（FinMind API）
+外資分點持股追蹤主程式（histock.tw 分點資料）
 
 邏輯：掃成交量前 N 大股票，找出目標分點當日買賣的所有標的。
   - watch_side=buy  → 追蹤囤貨分點當日買進張數
   - watch_side=sell → 追蹤出貨分點當日賣出張數
   - watch_side=net  → 追蹤綜合贏家淨買賣張數
+
+注意：histock 資料約於每日 21:00 後上傳，系統排程設於 22:00。
 
 用法：
   python main.py                      # 抓今日資料並發信
@@ -13,7 +15,6 @@
   python main.py --backfill           # 從 config start_date 回補至今
   python main.py --report             # 僅寄今日報告，不抓新資料
   python main.py --no-email           # 抓資料但不寄信（存 HTML）
-  python main.py --list-brokers       # 印出可用的外資分點代碼
 """
 import argparse
 import time
@@ -33,8 +34,6 @@ def load_config() -> dict:
     cfg_path = Path(__file__).parent / "config.yaml"
     with open(cfg_path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
-    if os.getenv("FINMIND_TOKEN"):
-        cfg["finmind_token"] = os.getenv("FINMIND_TOKEN")
     if os.getenv("GMAIL_SENDER"):
         cfg["email"]["sender"] = os.getenv("GMAIL_SENDER")
     if os.getenv("GMAIL_APP_PASSWORD"):
@@ -61,11 +60,10 @@ def build_broker_meta(branches: list[dict]) -> dict[str, dict]:
 
 def sync_date(
     d: date,
-    token: str,
     target_ids: set[str],
     broker_meta: dict[str, dict],
     top_n: int = 200,
-    delay: float = 2.0,
+    delay: float = 1.0,
 ) -> bool:
     """掃成交量前 top_n 大股票，找出目標分點在指定日期的交易記錄。
     回傳 False 表示無法取得股票清單。
@@ -75,7 +73,8 @@ def sync_date(
         print("  [warn] 無法取得股票清單")
         return False
 
-    print(f"  掃描前 {len(all_stocks)} 大成交量股票（FinMind 完整分點）")
+    print(f"  掃描前 {len(all_stocks)} 大成交量股票（histock 前 30 分點）")
+    fetcher.init_session()
     matched = 0
 
     for i, stock in enumerate(all_stocks):
@@ -85,7 +84,7 @@ def sync_date(
         if storage.is_synced(d, code):
             continue
 
-        records = fetcher.fetch_broker_trades(code, d, token)
+        records = fetcher.fetch_broker_trades(code, d)
         filtered = []
         for r in records:
             bid = r.get("broker_id", "")
@@ -134,7 +133,7 @@ def build_and_send(
         trades=trades,
         positions=positions,
         broker_meta=broker_meta,
-        threshold_lots=threshold,
+        threshold_wan=threshold,
     )
 
     if no_email:
@@ -158,40 +157,18 @@ def main():
     parser.add_argument("--backfill",     action="store_true", help="從 start_date 回補至今")
     parser.add_argument("--report",       action="store_true", help="僅寄報告，不抓新資料")
     parser.add_argument("--no-email",     action="store_true", help="不寄信，存 HTML 檔")
-    parser.add_argument("--list-brokers", action="store_true", help="列出可用外資分點代碼")
     args = parser.parse_args()
 
     cfg = load_config()
     storage.init_db()
 
-    token       = cfg.get("finmind_token", "").strip()
     broker_meta = build_broker_meta(cfg["branches"])
     target_ids  = set(broker_meta.keys())
 
-    if args.list_brokers:
-        print("從 FinMind TaiwanSecuritiesTraderInfo 查詢外資分點：")
-        found = fetcher.discover_broker_ids(
-            ["花旗", "摩根", "高盛", "瑞銀", "美林", "麥格理", "匯豐", "法銀", "野村"]
-        )
-        for bid, bname in sorted(found.items()):
-            marker = " ← 已追蹤" if bid in target_ids else ""
-            print(f"  {bid}: {bname}{marker}")
-        return
-
-    if not token:
-        print("錯誤：未設定 FINMIND_TOKEN，請在環境變數或 config.yaml 中設定。")
-        return
-
-    print("確認 FinMind 帳號權限...", end=" ", flush=True)
-    if not fetcher.check_finmind_access(token):
-        print("失敗 — token 無效或無 TaiwanStockTradingDailyReport 權限")
-        return
-    print("OK")
-
     email_cfg = cfg["email"]
-    threshold = cfg.get("alert_threshold_lots", 100)
+    threshold = cfg.get("alert_threshold_wan", 2000)
     top_n     = cfg.get("scan_top_n", 200)
-    delay     = float(cfg.get("request_delay_seconds", 2.0))
+    delay     = float(cfg.get("request_delay_seconds", 1.0))
 
     import os
     run_date_env = os.getenv("RUN_DATE", "").strip()
@@ -207,7 +184,7 @@ def main():
         print(f"共 {len(trading_days)} 個交易日")
         for d in trading_days:
             print(f"\n[{d}]")
-            ok = sync_date(d, token, target_ids, broker_meta, top_n, delay)
+            ok = sync_date(d, target_ids, broker_meta, top_n, delay)
             if not ok:
                 print("  中止回補，請確認資料源狀態後重試")
                 break
@@ -217,7 +194,7 @@ def main():
 
     if not args.report:
         print(f"[{target_date}] 掃描資料...")
-        sync_date(target_date, token, target_ids, broker_meta, top_n, delay)
+        sync_date(target_date, target_ids, broker_meta, top_n, delay)
 
     build_and_send(
         report_date=target_date,

@@ -28,6 +28,10 @@ def init_db():
                 buy_lots    INTEGER NOT NULL DEFAULT 0,
                 sell_lots   INTEGER NOT NULL DEFAULT 0,
                 net_lots    INTEGER NOT NULL DEFAULT 0,
+                avg_price   REAL    NOT NULL DEFAULT 0,
+                buy_value   INTEGER NOT NULL DEFAULT 0,
+                sell_value  INTEGER NOT NULL DEFAULT 0,
+                net_value   INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(trade_date, stock_code, broker_code)
             );
 
@@ -55,10 +59,15 @@ def init_db():
 
 
 def _migrate(conn: sqlite3.Connection):
-    """舊版 schema 升級：補上 watch_side / total_buy / total_sell 欄位。"""
+    """舊版 schema 升級：補上缺少的欄位。"""
     trades_cols = {row[1] for row in conn.execute("PRAGMA table_info(trades)").fetchall()}
     if trades_cols and "watch_side" not in trades_cols:
         conn.execute("ALTER TABLE trades ADD COLUMN watch_side TEXT NOT NULL DEFAULT 'net'")
+    if trades_cols and "avg_price" not in trades_cols:
+        conn.execute("ALTER TABLE trades ADD COLUMN avg_price  REAL    NOT NULL DEFAULT 0")
+        conn.execute("ALTER TABLE trades ADD COLUMN buy_value  INTEGER NOT NULL DEFAULT 0")
+        conn.execute("ALTER TABLE trades ADD COLUMN sell_value INTEGER NOT NULL DEFAULT 0")
+        conn.execute("ALTER TABLE trades ADD COLUMN net_value  INTEGER NOT NULL DEFAULT 0")
 
     pos_cols = {row[1] for row in conn.execute("PRAGMA table_info(positions)").fetchall()}
     if pos_cols and "total_buy" not in pos_cols:
@@ -105,12 +114,15 @@ def save_trades(trade_date: date, stock_code: str, stock_name: str,
                 """
                 INSERT OR REPLACE INTO trades
                     (trade_date, stock_code, stock_name, broker_code, broker_name,
-                     watch_side, buy_lots, sell_lots, net_lots)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     watch_side, buy_lots, sell_lots, net_lots,
+                     avg_price, buy_value, sell_value, net_value)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (date_str, stock_code, stock_name,
                  bid, r["broker_name"], ws,
-                 r["buy_lots"], r["sell_lots"], r["net_lots"]),
+                 r["buy_lots"], r["sell_lots"], r["net_lots"],
+                 r.get("avg_price", 0), r.get("buy_value", 0),
+                 r.get("sell_value", 0), r.get("net_value", 0)),
             )
             conn.execute(
                 """
@@ -147,7 +159,8 @@ def get_today_trades(trade_date: date, target_brokers: list[str]) -> list[dict]:
             f"""
             SELECT trade_date, stock_code, stock_name,
                    broker_code, broker_name, watch_side,
-                   buy_lots, sell_lots, net_lots
+                   buy_lots, sell_lots, net_lots,
+                   avg_price, buy_value, sell_value, net_value
             FROM trades
             WHERE trade_date=? AND broker_code IN ({placeholders})
             ORDER BY ABS(net_lots) DESC

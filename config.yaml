@@ -1,7 +1,5 @@
 # 外資分點追蹤設定
 
-finmind_token: ""   # 留空，改用環境變數 FINMIND_TOKEN
-
 # watch_side:
 #   buy  = 囤主力，追蹤當日買進張數
 #   sell = 出主力，追蹤當日賣出張數
@@ -160,8 +158,8 @@ email:
 # 掃描 TWSE 成交量前 N 大股票（FinMind stock-first 模式）
 scan_top_n: 200
 
-# 每檔請求延遲（秒）
-request_delay_seconds: 2.0   # FinMind 免費層建議 ≥ 2 秒
+# 每檔請求延遲（秒），histock 使用 1 秒即可
+request_delay_seconds: 1.0
 
 # 單日買賣超張數門檻（低於此值不顯示）
-alert_threshold_lots: 100
+alert_threshold_wan: 2000   # 單日買賣超金額門檻（萬元）
