@@ -133,7 +133,7 @@ def probe_broker():
     import fetcher
     s = fetcher._get_histock_session()
     try:
-        r = s.get("https://histock.tw/jscript/histock2017.js?v20260317", timeout=20)
+        r = s.get("https://histock.tw/jscript/histock.min-0.01.js?v20260317", timeout=20)
         js = r.text
         snippets = []
         pos = 0
