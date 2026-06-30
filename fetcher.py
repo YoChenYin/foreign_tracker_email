@@ -113,8 +113,8 @@ def _new_histock_session() -> requests.Session:
 _histock_session: requests.Session | None = None
 _histock_rate_limited: bool = False
 
-# histock 頁面有資料時至少 85000 bytes
-_HISTOCK_MIN_DATA_SIZE = 85_000
+# histock 頁面有資料時至少 50000 bytes（實測約 78K，預留 buffer）
+_HISTOCK_MIN_DATA_SIZE = 50_000
 
 
 def _get_histock_session() -> requests.Session:
