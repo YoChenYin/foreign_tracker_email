@@ -129,31 +129,32 @@ def probe():
 
 @app.route("/probe-broker")
 def probe_broker():
-    """診斷用：抓花旗環球(1590) broker.aspx 原始 HTML 前 3000 字元，用來確認頁面結構。"""
+    """診斷用：測試 branch.aspx?bno=1590（花旗環球分點反查），回傳 table 片段供確認結構。"""
     import fetcher
     from datetime import date
     today = date.today()
     date_str = today.strftime("%Y%m%d")
-    try:
-        s = fetcher._get_histock_session()
-        r = s.get(
-            fetcher.HISTOCK_BROKER_URL,
-            params={"no": "1590", "from": date_str, "to": date_str},
-            timeout=20,
-        )
-        html = r.text
-        # 找到第一個 <table 的位置，只回傳 table 以後的 3000 字元
-        idx = html.find("<table")
-        snippet = html[idx:idx + 3000] if idx >= 0 else html[:3000]
-        return jsonify({
-            "date": str(today),
-            "status_code": r.status_code,
-            "total_bytes": len(html),
-            "table_found_at": idx,
-            "html_snippet": snippet,
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    results = {}
+    s = fetcher._get_histock_session()
+    # 測試 branch.aspx 以 bno= 參數做分點反查
+    for label, params in [
+        ("branch_bno", {"bno": "1590", "from": date_str, "to": date_str}),
+        ("branch_no",  {"no":  "1590", "from": date_str, "to": date_str}),
+    ]:
+        try:
+            r = s.get(fetcher.HISTOCK_BRANCH_URL, params=params, timeout=20)
+            html = r.text
+            idx = html.find("<table")
+            snippet = html[idx:idx + 2000] if idx >= 0 else html[:500]
+            results[label] = {
+                "status_code": r.status_code,
+                "total_bytes": len(html),
+                "table_found_at": idx,
+                "html_snippet": snippet,
+            }
+        except Exception as e:
+            results[label] = {"error": str(e)}
+    return jsonify({"date": str(today), **results})
 
 
 @app.route("/trades")
