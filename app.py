@@ -127,6 +127,35 @@ def probe():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/probe-broker")
+def probe_broker():
+    """診斷用：抓花旗環球(1590) broker.aspx 原始 HTML 前 3000 字元，用來確認頁面結構。"""
+    import fetcher
+    from datetime import date
+    today = date.today()
+    date_str = today.strftime("%Y%m%d")
+    try:
+        s = fetcher._get_histock_session()
+        r = s.get(
+            fetcher.HISTOCK_BROKER_URL,
+            params={"no": "1590", "from": date_str, "to": date_str},
+            timeout=20,
+        )
+        html = r.text
+        # 找到第一個 <table 的位置，只回傳 table 以後的 3000 字元
+        idx = html.find("<table")
+        snippet = html[idx:idx + 3000] if idx >= 0 else html[:3000]
+        return jsonify({
+            "date": str(today),
+            "status_code": r.status_code,
+            "total_bytes": len(html),
+            "table_found_at": idx,
+            "html_snippet": snippet,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/trades")
 def trades():
     """診斷用：列出今日 DB 裡的所有交易記錄（不套門檻）。"""
