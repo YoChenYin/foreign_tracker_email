@@ -16,6 +16,7 @@ from datetime import date
 
 FINMIND_URL = "https://api.finmindtrade.com/api/v4/data"
 HISTOCK_BRANCH_URL = "https://histock.tw/stock/branch.aspx"
+HISTOCK_BROKER_URL = "https://histock.tw/stock/broker.aspx"
 
 
 # ──────────────────────────────────────────────
@@ -204,6 +205,107 @@ def _parse_histock_table(html: str) -> list[dict]:
                 "sell_lots": sell,
                 "net_lots": net,
             })
+    return records
+
+
+# ──────────────────────────────────────────────
+# 免費模式：histock.tw（分點為主）
+# ──────────────────────────────────────────────
+
+def fetch_stocks_by_broker_histock(broker_id: str, trade_date: date, top_n: int = 10) -> list[dict]:
+    """
+    histock.tw 免費模式（分點為主）：取得指定分點在指定日期的前 top_n 大成交個股。
+    回傳 list of {'stock_code', 'stock_name', 'buy_lots', 'sell_lots', 'net_lots'}
+    已依總成交量（buy+sell）降冪排序，取前 top_n 筆。
+    """
+    if _histock_rate_limited:
+        return []
+    date_str = trade_date.strftime("%Y%m%d")
+    s = _get_histock_session()
+    try:
+        resp = s.get(
+            HISTOCK_BROKER_URL,
+            params={"no": broker_id, "from": date_str, "to": date_str},
+            timeout=20,
+        )
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        print(f"  [histock broker error] {broker_id} {date_str}: {e}")
+        return []
+
+    records = _parse_histock_broker_table(resp.text)
+    records.sort(key=lambda r: r["buy_lots"] + r["sell_lots"], reverse=True)
+    return records[:top_n]
+
+
+def _parse_histock_broker_table(html: str) -> list[dict]:
+    """
+    解析 histock.tw broker.aspx 的個股交易表格。
+    每列格式：[排名] 股票代號/名稱  買進(張)  賣出(張)  買賣超(張)
+    股票代號以 <a href="...no=XXXX..."> 或純文字 4 位數呈現。
+    """
+    records = []
+    rows = re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.DOTALL)
+    for row in rows:
+        cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)
+        if len(cells) < 4:
+            continue
+
+        # 找含股票代號的 cell（優先抓連結，備案抓純文字 4 位數）
+        stock_code = None
+        code_idx = -1
+        for idx, cell in enumerate(cells):
+            m = re.search(r'(?:no|stockno|stock_no)=(\d{4,6})', cell, re.IGNORECASE)
+            if not m:
+                plain = re.sub(r"<[^>]+>", "", cell).strip()
+                m = re.fullmatch(r"(\d{4})", plain)
+            if m:
+                candidate = m.group(1)
+                if candidate.isdigit() and len(candidate) == 4:
+                    stock_code = candidate
+                    code_idx = idx
+                    break
+
+        if not stock_code:
+            continue
+
+        # 股票名稱：先嘗試從同格取文字，若空則看下一格
+        stock_name = re.sub(r"<[^>]+>", "", cells[code_idx]).strip()
+        remaining = cells[code_idx + 1:]
+        if not stock_name and remaining:
+            candidate_name = re.sub(r"<[^>]+>", "", remaining[0]).strip()
+            if not re.match(r"^\d", candidate_name):   # 名稱不以數字開頭
+                stock_name = candidate_name
+                remaining = remaining[1:]
+
+        # 從剩餘 cell 依序讀買進、賣出、淨買賣
+        nums = []
+        for cell in remaining:
+            text = re.sub(r"<[^>]+>", "", cell).strip().replace(",", "").replace("+", "")
+            if re.match(r"^-?\d+$", text):
+                nums.append(int(text))
+            elif text in ("", "-", "—", "－"):
+                nums.append(0)
+            if len(nums) >= 3:
+                break
+
+        if len(nums) < 2:
+            continue
+
+        buy  = nums[0]
+        sell = nums[1]
+        net  = nums[2] if len(nums) > 2 else buy - sell
+
+        if buy == 0 and sell == 0:
+            continue
+
+        records.append({
+            "stock_code": stock_code,
+            "stock_name": stock_name or stock_code,
+            "buy_lots":   buy,
+            "sell_lots":  sell,
+            "net_lots":   net,
+        })
     return records
 
 

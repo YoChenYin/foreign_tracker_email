@@ -157,8 +157,9 @@ email:
     - "shelly7526@gmail.com"         # 或設環境變數 GMAIL_RECIPIENTS（逗號分隔）
   subject_prefix: "[外資追蹤]"
 
-# 掃描 TWSE 成交量前 N 大股票
-scan_top_n: 200
+# histock 模式：每個目標分點抓前 N 大成交個股（broker-first）
+# FinMind 模式：掃成交量前 N 大股票（stock-first）
+scan_top_n: 10
 
 # 每檔請求延遲（秒）
 request_delay_seconds: 2.0

@@ -48,13 +48,17 @@ def run_daily():
             use_finmind = fetcher.check_finmind_access(token)
 
         threshold = cfg.get("alert_threshold_lots", 100)
-        top_n     = cfg.get("scan_top_n", 200)
+        top_n     = cfg.get("scan_top_n", 10)
         delay     = float(cfg.get("request_delay_seconds", 2.0 if not use_finmind else 0.3))
 
         run_date_env = os.getenv("RUN_DATE", "").strip()
         target_date  = date.fromisoformat(run_date_env) if run_date_env else date.today()
 
-        tracker.sync_date(target_date, token, use_finmind, target_ids, broker_meta, top_n, delay)
+        ok = tracker.sync_date(target_date, token, use_finmind, target_ids, broker_meta, top_n, delay)
+        if not ok:
+            logging.warning("資料同步失敗，略過發信")
+            _last_run = {"status": "sync_failed", "date": str(target_date), "at": str(datetime.now(TAIPEI))}
+            return
         tracker.build_and_send(
             report_date=target_date,
             broker_meta=broker_meta,

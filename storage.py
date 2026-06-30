@@ -71,13 +71,24 @@ def _migrate(conn: sqlite3.Connection):
                 conn.execute("UPDATE positions SET total_net = total_lots")
 
 
-def is_synced(trade_date: date, stock_code: str) -> bool:
+def is_synced(trade_date: date, key: str) -> bool:
+    """key 可以是股票代號（stock-first 模式）或 _b_BROKERID（broker-first 模式）。"""
     with get_conn() as conn:
         row = conn.execute(
             "SELECT 1 FROM sync_log WHERE trade_date=? AND stock_code=?",
-            (trade_date.isoformat(), stock_code),
+            (trade_date.isoformat(), key),
         ).fetchone()
         return row is not None
+
+
+def mark_synced(trade_date: date, key: str):
+    """標記指定 key 在該日期已同步（broker-first 模式用 _b_BROKERID 為 key）。"""
+    from datetime import datetime
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO sync_log VALUES (?, ?, ?)",
+            (trade_date.isoformat(), key, datetime.now().isoformat()),
+        )
 
 
 def save_trades(trade_date: date, stock_code: str, stock_name: str,
