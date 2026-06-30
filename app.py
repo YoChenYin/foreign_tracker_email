@@ -4,6 +4,7 @@
 排程：每個交易日 17:30 台灣時間自動執行。
 手動觸發：GET /run
 健康檢查：GET / 或 GET /health
+診斷查詢：GET /trades
 """
 import logging
 import os
@@ -20,7 +21,7 @@ logging.basicConfig(
     force=True,
 )
 
-app   = Flask(__name__)
+app    = Flask(__name__)
 TAIPEI = ZoneInfo("Asia/Taipei")
 
 _last_run: dict = {}
@@ -28,7 +29,6 @@ _last_run: dict = {}
 
 def run_daily():
     global _last_run
-    # import 放在函式內，避免啟動時任何模組錯誤讓 Flask 無法起來
     import fetcher
     import main as tracker
     import storage
@@ -43,22 +43,32 @@ def run_daily():
         target_ids  = set(broker_meta.keys())
         token       = cfg.get("finmind_token", "").strip()
 
-        use_finmind = False
-        if token:
-            use_finmind = fetcher.check_finmind_access(token)
+        if not token:
+            logging.error("未設定 FINMIND_TOKEN")
+            _last_run = {"status": "error", "error": "FINMIND_TOKEN not set",
+                         "at": str(datetime.now(TAIPEI))}
+            return
 
-        threshold = cfg.get("alert_threshold_lots", 100)
-        top_n     = cfg.get("scan_top_n", 10)
-        delay     = float(cfg.get("request_delay_seconds", 2.0 if not use_finmind else 0.3))
+        if not fetcher.check_finmind_access(token):
+            logging.error("FinMind token 無效或無 TaiwanStockTradingDailyReport 權限")
+            _last_run = {"status": "error", "error": "FinMind token invalid",
+                         "at": str(datetime.now(TAIPEI))}
+            return
+
+        threshold   = cfg.get("alert_threshold_lots", 100)
+        top_n       = cfg.get("scan_top_n", 200)
+        delay       = float(cfg.get("request_delay_seconds", 2.0))
 
         run_date_env = os.getenv("RUN_DATE", "").strip()
         target_date  = date.fromisoformat(run_date_env) if run_date_env else date.today()
 
-        ok = tracker.sync_date(target_date, token, use_finmind, target_ids, broker_meta, top_n, delay)
+        ok = tracker.sync_date(target_date, token, target_ids, broker_meta, top_n, delay)
         if not ok:
             logging.warning("資料同步失敗，略過發信")
-            _last_run = {"status": "sync_failed", "date": str(target_date), "at": str(datetime.now(TAIPEI))}
+            _last_run = {"status": "sync_failed", "date": str(target_date),
+                         "at": str(datetime.now(TAIPEI))}
             return
+
         tracker.build_and_send(
             report_date=target_date,
             broker_meta=broker_meta,
@@ -84,7 +94,7 @@ def scheduler_loop():
         try:
             now   = datetime.now(TAIPEI)
             today = now.date()
-            if (now.weekday() < 5          # 週一到週五
+            if (now.weekday() < 5
                     and now.hour == 17
                     and now.minute == 30
                     and last_run_date != today):
@@ -103,66 +113,15 @@ def health():
     return jsonify({"status": "ok", "date": str(date.today()), "last_run": _last_run})
 
 
-@app.route("/probe")
-def probe():
-    """診斷用：直接測試 histock.tw 對今日台積電分點頁的回應大小。"""
-    import fetcher
-    from datetime import date
-    target = date.today()
-    date_str = target.strftime("%Y%m%d")
-    url = fetcher.HISTOCK_BRANCH_URL
-    try:
-        s = fetcher._get_histock_session()
-        r = s.get(url, params={"no": "2330", "from": date_str, "to": date_str}, timeout=15)
-        size = len(r.text)
-        available = size >= fetcher._HISTOCK_MIN_DATA_SIZE
-        return jsonify({
-            "date": str(target),
-            "status_code": r.status_code,
-            "response_bytes": size,
-            "threshold": fetcher._HISTOCK_MIN_DATA_SIZE,
-            "available": available,
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/probe-broker")
-def probe_broker():
-    """診斷用：從 histock2017.js 取三個 $.ajax( 各自前後 300 字元找 URL。"""
-    import fetcher
-    s = fetcher._get_histock_session()
-    try:
-        r = s.get("https://histock.tw/jscript/histock.min-0.01.js?v20260317", timeout=20)
-        js = r.text
-        snippets = []
-        pos = 0
-        while True:
-            idx = js.find("$.ajax(", pos)
-            if idx < 0:
-                break
-            snippets.append(js[max(0, idx-50):idx+300])
-            pos = idx + 1
-        return jsonify({"total_bytes": len(js), "ajax_snippets": snippets})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
 @app.route("/trades")
 def trades():
     """診斷用：列出今日 DB 裡的所有交易記錄（不套門檻）。"""
     import storage
-    from datetime import date
-    today = date.today()
     import main as tracker
-    cfg = tracker.load_config()
+    cfg        = tracker.load_config()
     broker_meta = tracker.build_broker_meta(cfg["branches"])
-    rows = storage.get_today_trades(today, list(broker_meta.keys()))
-    return jsonify({
-        "date": str(today),
-        "count": len(rows),
-        "trades": rows,
-    })
+    rows = storage.get_today_trades(date.today(), list(broker_meta.keys()))
+    return jsonify({"date": str(date.today()), "count": len(rows), "trades": rows})
 
 
 @app.route("/run", methods=["GET", "POST"])

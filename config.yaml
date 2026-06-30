@@ -157,12 +157,11 @@ email:
     - "shelly7526@gmail.com"         # 或設環境變數 GMAIL_RECIPIENTS（逗號分隔）
   subject_prefix: "[外資追蹤]"
 
-# histock 模式：每個目標分點抓前 N 大成交個股（broker-first）
-# FinMind 模式：掃成交量前 N 大股票（stock-first）
-scan_top_n: 10
+# 掃描 TWSE 成交量前 N 大股票（FinMind stock-first 模式）
+scan_top_n: 200
 
 # 每檔請求延遲（秒）
-request_delay_seconds: 2.0
+request_delay_seconds: 2.0   # FinMind 免費層建議 ≥ 2 秒
 
 # 單日買賣超張數門檻（低於此值不顯示）
 alert_threshold_lots: 100

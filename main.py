@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-外資分點持股追蹤主程式
+外資分點持股追蹤主程式（FinMind API）
 
-邏輯：以「分點」為主，掃成交量前 N 大股票，找出目標分點當日買賣的所有標的。
+邏輯：掃成交量前 N 大股票，找出目標分點當日買賣的所有標的。
   - watch_side=buy  → 追蹤囤貨分點當日買進張數
   - watch_side=sell → 追蹤出貨分點當日賣出張數
   - watch_side=net  → 追蹤綜合贏家淨買賣張數
@@ -33,7 +33,6 @@ def load_config() -> dict:
     cfg_path = Path(__file__).parent / "config.yaml"
     with open(cfg_path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
-    # 環境變數優先（Zeabur / Docker 部署用）
     if os.getenv("FINMIND_TOKEN"):
         cfg["finmind_token"] = os.getenv("FINMIND_TOKEN")
     if os.getenv("GMAIL_SENDER"):
@@ -63,83 +62,14 @@ def build_broker_meta(branches: list[dict]) -> dict[str, dict]:
 def sync_date(
     d: date,
     token: str,
-    use_finmind: bool,
-    target_ids: set[str],
-    broker_meta: dict[str, dict],
-    top_n: int = 10,
-    delay: float = 2.0,
-) -> bool:
-    """
-    histock 模式：以分點為主，每分點抓前 top_n 大成交個股（broker-first）。
-    FinMind 模式：以個股為主，掃成交量前 top_n 大股票（stock-first）。
-    回傳 False 表示資料源不可用或同步失敗。
-    """
-    if use_finmind:
-        return _sync_stock_first(d, token, target_ids, broker_meta, top_n, delay)
-    return _sync_broker_first(d, target_ids, broker_meta, top_n, delay)
-
-
-def _sync_broker_first(
-    d: date,
-    target_ids: set[str],
-    broker_meta: dict[str, dict],
-    top_n: int = 10,
-    delay: float = 2.0,
-) -> bool:
-    """histock 免費模式：以分點為主，每分點抓前 top_n 大成交個股。"""
-    unsynced = [bid for bid in sorted(target_ids)
-                if not storage.is_synced(d, f"_b_{bid}")]
-
-    if not unsynced:
-        print(f"  所有 {len(target_ids)} 個分點今日已同步")
-        return True
-
-    print("  確認 histock.tw 可用性...", end=" ", flush=True)
-    if not fetcher.is_histock_available(d):
-        print("❌ 暫時無法存取（IP rate-limited 或資料尚未更新），請稍後再試")
-        return False
-    print("OK")
-
-    print(f"  掃描 {len(unsynced)} 個分點，每分點取前 {top_n} 大成交個股")
-    total_records = 0
-
-    for broker_id in unsynced:
-        meta    = broker_meta[broker_id]
-        ws_tag  = {"buy": "囤", "sell": "出", "net": "贏"}.get(meta["watch_side"], "")
-        records = fetcher.fetch_stocks_by_broker_histock(broker_id, d, top_n=top_n)
-
-        for r in records:
-            if r["buy_lots"] == 0 and r["sell_lots"] == 0:
-                continue
-            r["broker_id"]   = broker_id
-            r["broker_name"] = meta["name"]
-            r["watch_side"]  = meta["watch_side"]
-            storage.save_trades(d, r["stock_code"], r["stock_name"], [r], mark_synced=False)
-            sign = "+" if r["net_lots"] > 0 else ""
-            print(f"    [{ws_tag}]{meta['name']}({broker_id}) "
-                  f"{r['stock_code']} {r['stock_name']}: "
-                  f"買{r['buy_lots']} 賣{r['sell_lots']} 淨{sign}{r['net_lots']}")
-            total_records += 1
-
-        if not records:
-            print(f"    [{ws_tag}]{meta['name']}({broker_id}): 今日無交易記錄")
-
-        storage.mark_synced(d, f"_b_{broker_id}")
-        time.sleep(delay)
-
-    print(f"  掃描完成：共 {total_records} 筆目標分點交易記錄")
-    return True
-
-
-def _sync_stock_first(
-    d: date,
-    token: str,
     target_ids: set[str],
     broker_meta: dict[str, dict],
     top_n: int = 200,
-    delay: float = 0.3,
+    delay: float = 2.0,
 ) -> bool:
-    """FinMind 付費模式：以個股為主，掃成交量前 top_n 大股票的完整分點資料。"""
+    """掃成交量前 top_n 大股票，找出目標分點在指定日期的交易記錄。
+    回傳 False 表示無法取得股票清單。
+    """
     all_stocks = fetcher.get_top_stocks_by_volume(top_n)
     if not all_stocks:
         print("  [warn] 無法取得股票清單")
@@ -155,10 +85,10 @@ def _sync_stock_first(
         if storage.is_synced(d, code):
             continue
 
-        records = fetcher.fetch_broker_trades_finmind(code, d, token)
+        records = fetcher.fetch_broker_trades(code, d, token)
         filtered = []
         for r in records:
-            bid = r.get("broker_id") or r.get("broker_code", "")
+            bid = r.get("broker_id", "")
             if bid not in target_ids:
                 continue
             if r["buy_lots"] == 0 and r["sell_lots"] == 0:
@@ -170,16 +100,18 @@ def _sync_stock_first(
             filtered.append(r)
 
         storage.save_trades(d, code, name, filtered)
+
         if filtered:
             matched += 1
             for r in filtered:
                 ws_tag = {"buy": "囤", "sell": "出", "net": "贏"}.get(r["watch_side"], "")
-                sign = "+" if r["net_lots"] > 0 else ""
+                sign   = "+" if r["net_lots"] > 0 else ""
                 print(f"    {code} {name} | [{ws_tag}]{r['broker_name']}({r['broker_id']}): "
                       f"買{r['buy_lots']} 賣{r['sell_lots']} 淨{sign}{r['net_lots']}")
 
-        if (i + 1) % 100 == 0:
+        if (i + 1) % 50 == 0:
             print(f"  ... 已掃 {i+1}/{len(all_stocks)} 檔，目前 {matched} 檔有目標分點")
+
         time.sleep(delay)
 
     print(f"  掃描完成：{matched} 檔股票有目標分點交易記錄")
@@ -194,8 +126,8 @@ def build_and_send(
     no_email: bool,
 ):
     target_ids = list(broker_meta.keys())
-    trades    = storage.get_today_trades(report_date, target_ids)
-    positions = storage.get_positions(target_ids)
+    trades     = storage.get_today_trades(report_date, target_ids)
+    positions  = storage.get_positions(target_ids)
 
     html = reporter.build_html_report(
         report_date=report_date,
@@ -246,16 +178,20 @@ def main():
             print(f"  {bid}: {bname}{marker}")
         return
 
-    use_finmind = False
-    if token:
-        print("確認 FinMind 帳號權限...", end=" ", flush=True)
-        use_finmind = fetcher.check_finmind_access(token)
-        print("OK（完整分點資料）" if use_finmind else "免費層，改用 histock.tw")
+    if not token:
+        print("錯誤：未設定 FINMIND_TOKEN，請在環境變數或 config.yaml 中設定。")
+        return
+
+    print("確認 FinMind 帳號權限...", end=" ", flush=True)
+    if not fetcher.check_finmind_access(token):
+        print("失敗 — token 無效或無 TaiwanStockTradingDailyReport 權限")
+        return
+    print("OK")
 
     email_cfg = cfg["email"]
     threshold = cfg.get("alert_threshold_lots", 100)
-    top_n     = cfg.get("scan_top_n", 10)
-    delay     = float(cfg.get("request_delay_seconds", 2.0 if not use_finmind else 0.3))
+    top_n     = cfg.get("scan_top_n", 200)
+    delay     = float(cfg.get("request_delay_seconds", 2.0))
 
     import os
     run_date_env = os.getenv("RUN_DATE", "").strip()
@@ -271,7 +207,7 @@ def main():
         print(f"共 {len(trading_days)} 個交易日")
         for d in trading_days:
             print(f"\n[{d}]")
-            ok = sync_date(d, token, use_finmind, target_ids, broker_meta, top_n, delay)
+            ok = sync_date(d, token, target_ids, broker_meta, top_n, delay)
             if not ok:
                 print("  中止回補，請確認資料源狀態後重試")
                 break
@@ -281,7 +217,7 @@ def main():
 
     if not args.report:
         print(f"[{target_date}] 掃描資料...")
-        sync_date(target_date, token, use_finmind, target_ids, broker_meta, top_n, delay)
+        sync_date(target_date, token, target_ids, broker_meta, top_n, delay)
 
     build_and_send(
         report_date=target_date,
