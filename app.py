@@ -103,6 +103,30 @@ def health():
     return jsonify({"status": "ok", "date": str(date.today()), "last_run": _last_run})
 
 
+@app.route("/probe")
+def probe():
+    """診斷用：直接測試 histock.tw 對今日台積電分點頁的回應大小。"""
+    import fetcher
+    from datetime import date
+    target = date.today()
+    date_str = target.strftime("%Y%m%d")
+    url = fetcher.HISTOCK_BRANCH_URL
+    try:
+        s = fetcher._get_histock_session()
+        r = s.get(url, params={"no": "2330", "from": date_str, "to": date_str}, timeout=15)
+        size = len(r.text)
+        available = size >= fetcher._HISTOCK_MIN_DATA_SIZE
+        return jsonify({
+            "date": str(target),
+            "status_code": r.status_code,
+            "response_bytes": size,
+            "threshold": fetcher._HISTOCK_MIN_DATA_SIZE,
+            "available": available,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/run", methods=["GET", "POST"])
 def trigger():
     """手動觸發（不阻塞 HTTP 回應）。"""
