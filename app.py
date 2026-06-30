@@ -113,6 +113,39 @@ def health():
     return jsonify({"status": "ok", "date": str(date.today()), "last_run": _last_run})
 
 
+@app.route("/probe-finmind")
+def probe_finmind():
+    """診斷用：直接呼叫 FinMind API 並回傳原始回應（含錯誤訊息）。"""
+    import fetcher
+    import main as tracker
+    cfg   = tracker.load_config()
+    token = cfg.get("finmind_token", "").strip()
+    try:
+        import requests
+        resp = requests.get(
+            fetcher.FINMIND_URL,
+            params={
+                "dataset": "TaiwanStockTradingDailyReport",
+                "data_id": "2330",
+                "start_date": "2026-06-10",
+                "end_date": "2026-06-10",
+                "token": token,
+            },
+            timeout=15,
+        )
+        payload = resp.json()
+        return jsonify({
+            "token_length": len(token),
+            "token_prefix": token[:6] + "..." if len(token) > 6 else token,
+            "http_status": resp.status_code,
+            "finmind_status": payload.get("status"),
+            "finmind_msg": payload.get("msg"),
+            "data_count": len(payload.get("data", [])),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/trades")
 def trades():
     """診斷用：列出今日 DB 裡的所有交易記錄（不套門檻）。"""
