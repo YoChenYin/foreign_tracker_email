@@ -129,21 +129,21 @@ def probe():
 
 @app.route("/probe-broker")
 def probe_broker():
-    """診斷用：從 histock2017.js 找 branch 相關的 AJAX endpoint URL。"""
+    """診斷用：從 histock2017.js 取三個 $.ajax( 各自前後 300 字元找 URL。"""
     import fetcher
     s = fetcher._get_histock_session()
     try:
         r = s.get("https://histock.tw/jscript/histock2017.js?v20260317", timeout=20)
         js = r.text
-        # 找所有含 branch / broker / BranchData / GetData 的行
-        lines = js.split("\n")
-        hits = [l.strip() for l in lines
-                if any(kw in l for kw in ["branch", "Branch", "broker", "Broker",
-                                          "GetData", "getdata", "ajax", "$.get", "$.post"])]
-        return jsonify({
-            "total_bytes": len(js),
-            "matching_lines": hits[:60],
-        })
+        snippets = []
+        pos = 0
+        while True:
+            idx = js.find("$.ajax(", pos)
+            if idx < 0:
+                break
+            snippets.append(js[max(0, idx-50):idx+300])
+            pos = idx + 1
+        return jsonify({"total_bytes": len(js), "ajax_snippets": snippets})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
