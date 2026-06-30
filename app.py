@@ -129,32 +129,38 @@ def probe():
 
 @app.route("/probe-broker")
 def probe_broker():
-    """診斷用：測試 branch.aspx?bno=1590（花旗環球分點反查），回傳 table 片段供確認結構。"""
+    """診斷用：確認 branch.aspx?no=2330 的實際資料格式（HTML <td> vs JavaScript）。"""
+    import re as _re
     import fetcher
     from datetime import date
     today = date.today()
     date_str = today.strftime("%Y%m%d")
-    results = {}
     s = fetcher._get_histock_session()
-    # 測試 branch.aspx 以 bno= 參數做分點反查
-    for label, params in [
-        ("branch_bno", {"bno": "1590", "from": date_str, "to": date_str}),
-        ("branch_no",  {"no":  "1590", "from": date_str, "to": date_str}),
-    ]:
-        try:
-            r = s.get(fetcher.HISTOCK_BRANCH_URL, params=params, timeout=20)
-            html = r.text
-            idx = html.find("<table")
-            snippet = html[idx:idx + 2000] if idx >= 0 else html[:500]
-            results[label] = {
-                "status_code": r.status_code,
-                "total_bytes": len(html),
-                "table_found_at": idx,
-                "html_snippet": snippet,
-            }
-        except Exception as e:
-            results[label] = {"error": str(e)}
-    return jsonify({"date": str(today), **results})
+    try:
+        r = s.get(fetcher.HISTOCK_BRANCH_URL,
+                  params={"no": "2330", "from": date_str, "to": date_str}, timeout=20)
+        html = r.text
+
+        # 找第一個 <td>（是否有資料列）
+        first_td = html.find("<td")
+        td_snippet = html[first_td:first_td + 500] if first_td >= 0 else ""
+
+        # 找 jsonDatas 賦值位置，截取 3000 字元看資料結構
+        js_idx = html.find("jsonDatas")
+        js_snippet = html[js_idx:js_idx + 3000] if js_idx >= 0 else ""
+
+        # 統計 <td 出現次數
+        td_count = len(_re.findall(r"<td", html))
+
+        return jsonify({
+            "date": str(today),
+            "total_bytes": len(html),
+            "td_count": td_count,
+            "first_td_snippet": td_snippet,
+            "jsonDatas_snippet": js_snippet,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/trades")
