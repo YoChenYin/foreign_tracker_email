@@ -127,6 +127,23 @@ def probe():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/trades")
+def trades():
+    """診斷用：列出今日 DB 裡的所有交易記錄（不套門檻）。"""
+    import storage
+    from datetime import date
+    today = date.today()
+    import main as tracker
+    cfg = tracker.load_config()
+    broker_meta = tracker.build_broker_meta(cfg["branches"])
+    rows = storage.get_today_trades(today, list(broker_meta.keys()))
+    return jsonify({
+        "date": str(today),
+        "count": len(rows),
+        "trades": rows,
+    })
+
+
 @app.route("/run", methods=["GET", "POST"])
 def trigger():
     """手動觸發（不阻塞 HTTP 回應）。"""
